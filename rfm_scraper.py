@@ -128,7 +128,7 @@ def to_camel_case(val: str) -> str:
 def detect_changes(scraped: Person, db_loaded: Person) -> Dict[str, Any] | None:
     changes = None
 
-    logger.info('Detecting changes between scraped: %s and db: %s', scraped, db_loaded)
+    logger.debug('Detecting changes between scraped: %s and db: %s', scraped, db_loaded)
     for attribute, new_value in scraped.__dict__.items():
         old_value = getattr(db_loaded, attribute)
 
