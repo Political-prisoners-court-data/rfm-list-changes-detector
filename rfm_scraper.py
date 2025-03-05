@@ -5,10 +5,13 @@ import requests
 from configparser import ConfigParser, ExtendedInterpolation
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Set
 
 from bs4 import BeautifulSoup
 from pymongo import MongoClient
+from logging import Logger
+
+from pymongo.synchronous.collection import Collection
 
 
 @dataclass(eq=False, frozen=True)
@@ -40,31 +43,124 @@ class Person:
         return hash(self.full_name)
 
 
+def load_config(env: str) -> ConfigParser:
+    cfg = ConfigParser(interpolation=ExtendedInterpolation())
+    cfg.read('config.ini')
+    cfg.read(f'config.{env}.ini')
+    return cfg
+
+
+def configure_logger(cfg: ConfigParser) -> Logger:
+    loglevel = cfg['log']['level']
+    # assuming loglevel is bound to the string value obtained from the
+    # command line argument. Convert to upper case to allow the user to
+    # specify --log=DEBUG or --log=debug
+    log_numeric_level = getattr(logging, loglevel.upper(), None)
+
+    if not isinstance(log_numeric_level, int):
+        raise ValueError('Invalid log level: %s' % loglevel)
+
+    log = logging.getLogger('__name__')
+    logging.basicConfig(filename='output.log', encoding='utf-8',
+                        level=log_numeric_level, format='%(levelname)s: %(asctime)s %(message)s')
+    return log
+
+
+def configure_mongo() -> (MongoClient, Collection, Collection):
+    client = MongoClient(
+        host=config['mongodb']['host'],
+        username=config['mongodb']['username'],
+        password=config['mongodb']['password']
+    )
+    persons = client[config['mongodb']['rfm_db']][config['mongodb']['persons_collection']]
+    events = client[config['mongodb']['events_db']][config['mongodb']['events_collection']]
+    return client, persons, events
+
+
+def scrape_persons() -> Set[Person]:
+    # Parse HTML using BeautifulSoup
+
+    content = load_html()
+    # TODO: For remove, because too much data of the page saved in log
+    logger.debug('Content of response: %s', content)
+
+    dom = BeautifulSoup(content, 'html.parser')
+    rfm_list = dom.select('#russianFL .terrorist-list')[0]
+    person_tags = rfm_list.find_all('li')
+
+    logger.info('Found rfm list entities count: %d', len(person_tags))
+
+    persons = set()
+
+    for person_tag in person_tags:
+        person_str = str(person_tag.string)
+        person = parse_person(person_str)
+        persons.add(person)
+
+    logger.info('Parsed persons list length: %d', len(persons))
+    return persons
+
+
+def load_html():
+    if environment == 'prod' or not config['rfm'].getboolean('use_file'):
+        return scrape_from_site()
+    else:
+        return load_from_file()
+
+
+def scrape_from_site() -> bytes:
+    site_url = config['rfm']['url']
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/123.0.0.0 Safari/537.36'
+    }
+    logger.info('Requesting site url: %s', site_url)
+    with requests.Session() as session:
+        response = session.get(site_url, headers=headers, verify=False)
+        content = response.content
+    return content
+
+
+def load_from_file() -> str:
+    filepath = config['rfm']['file_path']
+    logger.info('Reading file by path: %s', filepath)
+    with open(filepath, 'r') as fp:
+        content = fp.read()
+    return content
+
+
 def parse_person(person: str) -> Person:
     logger.debug('Parsing person string %s', person)
+
     remainder = person.rstrip('; ')
-    id_full_name, _, remainder = remainder.partition(',')
-    id_full_name = id_full_name.strip()
-    is_terr = id_full_name.endswith('*')
+
+    id_fullname, _, remainder = remainder.partition(',')
+    id_fullname = id_fullname.strip()
+
+    is_terr = id_fullname.endswith('*')
     if is_terr:
-        id_full_name = id_full_name[:-1]
-    id, _, full_name = id_full_name.partition('. ')
-    rfm_id = int(id)
-    val, _, remainder = remainder.partition(',')
-    val = val.strip()
-    if val.startswith('(') and val.endswith(')'):
-        aliases = [alias.strip() for alias in val[1:-1].split(';')]
-        val, _, remainder = remainder.partition(',')
+        id_fullname = id_fullname[:-1]
+
+    rfm_id_str, _, full_name = id_fullname.partition('. ')
+    rfm_id = int(rfm_id_str)
+
+    aliases_or_birth_date, _, remainder = remainder.partition(',')
+    aliases_or_birth_date = aliases_or_birth_date.strip()
+    if aliases_or_birth_date.startswith('(') and aliases_or_birth_date.endswith(')'):
+        aliases = [alias.strip() for alias in aliases_or_birth_date[1:-1].split(';')]
+        birth_date_str, _, remainder = remainder.partition(',')
     else:
         aliases = None
-    val = val.strip()
-    if val == '':
+        birth_date_str = aliases_or_birth_date
+
+    birth_date_str = birth_date_str.strip()
+    if birth_date_str == '':
         birth_date = None
     else:
         try:
-            birth_date = datetime.strptime(val, '%d.%m.%Y г.р.')
+            birth_date = datetime.strptime(birth_date_str, '%d.%m.%Y г.р.')
         except ValueError:
-            logger.error('Error to parse date: %s', val)
+            logger.error('Error to parse date: %s', birth_date_str)
             birth_date = None
 
     address = remainder.strip(', ')
@@ -74,55 +170,79 @@ def parse_person(person: str) -> Person:
     return Person(full_name, is_terr, birth_date, address, aliases, rfm_id)
 
 
-def scrape_persons() -> Dict[Person, Person]:
-    # Parse HTML using BeautifulSoup
-
-    if environment == 'prod' or config['rfm']['use_file'] == 'False':
-        siteurl = config['rfm']['url']
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'}
-        logger.info('Requesting site url: %s', siteurl)
-        response = requests.get(siteurl, headers=headers, verify=False)
-        content = response.content
-    else:
-        filepath = config['rfm']['file_path']
-        logger.info('Reading file by path: %s', filepath)
-        with open(filepath, 'r') as fp:
-            content = fp.read()
-
-    logger.debug('Content of response: %s', content)
-
-    dom = BeautifulSoup(content, 'html.parser')
-    rfm_list = dom.select('#russianFL .terrorist-list')[0]
-    person_tags = rfm_list.find_all('li')
-    logger.info('Found rfm list entities count: %d', len(person_tags))
-    scraped_persons = dict()
-
-    for person_tag in person_tags:
-        person_str = str(person_tag.string)
-        person = parse_person(person_str)
-        scraped_persons[person] = person
-
-    logger.info('Parsed persons list length: %d', len(scraped_persons))
-    return scraped_persons
-
-
 def load_db_persons() -> Dict[Person, Person]:
-    db_persons = dict()
-    for person_json in persons_collection.find():
-        person = Person(person_json['fullName'], person_json['isTerr'],
-                        person_json['birthDate'], person_json['address'],
-                        person_json['aliases'], person_json['rfmId'])
-        db_persons[person] = person
+    try:
+        persons = dict()
+        for person_json in persons_collection.find():
+            person = Person(person_json['fullName'], person_json['isTerr'],
+                            person_json['birthDate'], person_json['address'],
+                            person_json['aliases'], person_json['rfmId'])
+            persons[person] = person
 
-    logger.info('Fetched from db persons count: %d', len(db_persons))
-    return db_persons
+        logger.info('Fetched from db persons count: %d', len(persons))
+        return persons
+    except BaseException:
+        mongo.close()
+
+
+def save_list_changes():
+    try:
+        if db_persons:
+            # check if rfmDb.persons already has entries because we
+            # generate changes only after 2nd and consecutive runs to
+            # not spam whole rfm persons list added events
+
+            events_list = generate_rfm_list_changes()
+
+            if events_list:
+                events_collection.insert_many(events_list)
+
+        if scraped_persons:
+            # replace rfmDb.persons with actual scraped result
+
+            persons_collection.delete_many({})
+            scraped_person_dictionaries = convert_to_dictionaries(scraped_persons)
+            persons_collection.insert_many(scraped_person_dictionaries)
+    finally:
+        mongo.close()
+
+
+def generate_rfm_list_changes() -> List[Dict[str, Any]]:
+    events_list = []
+
+    for db_person in db_persons:
+        # loop db_persons, find not present in scrape result and mark as removed
+
+        if db_person not in scraped_persons:
+            add_whole_person_change('removed', db_person, events_list)
+
+    for scraped_person in scraped_persons:
+        # loop scraped_persons, find for intersections with db and detect changes + newly added
+
+        if scraped_person in db_persons:
+            changes = detect_changes(scraped_person, db_persons[scraped_person])
+            if changes is not None:
+                events_list.append(create_event('changed', changes))
+        else:
+            add_whole_person_change('added', scraped_person, events_list)
+
+    return events_list
+
+
+def add_whole_person_change(event_name: str, person: Person, events_list: List[Dict[str, Any]]):
+    changes = {to_camel_case(k): v for k, v in person.__dict__.items()}
+    events_list.append(create_event(event_name, changes))
 
 
 def to_camel_case(val: str) -> str:
     name = ''.join(val.title().split('_'))
     return name[0].lower() + name[1:]
+
+
+def create_event(event: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    changes['action'] = event
+    changes['date'] = datetime.now(timezone.utc)
+    return changes
 
 
 def detect_changes(scraped: Person, db_loaded: Person) -> Dict[str, Any] | None:
@@ -153,79 +273,20 @@ def detect_changes(scraped: Person, db_loaded: Person) -> Dict[str, Any] | None:
     return changes
 
 
-def create_event(event: str, changes: Dict[str, Any]) -> Dict[str, Any]:
-    changes['action'] = event
-    changes['date'] = datetime.now(timezone.utc)
-    return changes
+def convert_to_dictionaries(persons: Set[Person]) -> List[Dict[str, Any]]:
+    scraped_dictionaries = list()
+    for person in persons:
+        dct = {to_camel_case(k): v for k, v in person.__dict__.items()}
+        scraped_dictionaries.append(dct)
+    return scraped_dictionaries
 
 
 environment = os.getenv('PYTHON_ENV', 'dev')
-
-config = ConfigParser(os.environ, interpolation=ExtendedInterpolation())
-config.read('config.ini')
-config.read(f'config.{environment}.ini')
-
-loglevel = config['log']['level']
-
-# assuming loglevel is bound to the string value obtained from the
-# command line argument. Convert to upper case to allow the user to
-# specify --log=DEBUG or --log=debug
-log_numeric_level = getattr(logging, loglevel.upper(), None)
-if not isinstance(log_numeric_level, int):
-    raise ValueError('Invalid log level: %s' % loglevel)
-logger = logging.getLogger('__name__')
-logging.basicConfig(filename='output.log', encoding='utf-8',
-                    level=log_numeric_level, format='%(levelname)s: %(asctime)s %(message)s')
-
-mongo = MongoClient(
-    host=config['mongodb']['host'],
-    username=config['mongodb']['username'],
-    password=config['mongodb']['password']
-)
-
-persons_collection = mongo[config['mongodb']['rfm_db']][config['mongodb']['persons_collection']]
-events_collection = mongo[config['mongodb']['events_db']][config['mongodb']['events_collection']]
+config = load_config(environment)
+logger = configure_logger(config)
+mongo, persons_collection, events_collection = configure_mongo()
 
 scraped_persons = scrape_persons()
 db_persons = load_db_persons()
 
-if db_persons:
-    # generate changes only after 2nd and consecutive runs to not spam whole list added
-
-    events_list = []
-
-    for db_person in db_persons:
-        # loop db_persons, find not present in scrape result and mark as removed
-
-        if db_person not in scraped_persons:
-            changes = {to_camel_case(k): v for k, v in db_person.__dict__.items()}
-            events_list.append(create_event('removed', changes))
-
-    for scraped_person in scraped_persons:
-        # loop scraped_persons, find for new + intersections with db and detect changes
-
-        if scraped_person in db_persons:
-            changes = detect_changes(scraped_person, db_persons[scraped_person])
-            if changes is not None:
-                events_list.append(create_event('changed', changes))
-        else:
-            changes = {to_camel_case(k): v for k, v in scraped_person.__dict__.items()}
-            events_list.append(create_event('added', changes))
-
-    if events_list:
-        # save changes list
-        events_collection.insert_many(events_list)
-
-if scraped_persons:
-    # replace db persons with scraped result
-
-    persons_collection.delete_many({})
-    scraped_dcts = list()
-
-    for person in list(scraped_persons.values()):
-        dct = {to_camel_case(k): v for k, v in person.__dict__.items()}
-        scraped_dcts.append(dct)
-
-    persons_collection.insert_many(scraped_dcts)
-
-mongo.close()
+save_list_changes()
