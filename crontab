@@ -1,0 +1,2 @@
+23 07 * * * python rfm_scraper.py >> /output.log 2>&1 &
+02 15 * * * python rfm_scraper.py >> /output.log 2>&1 &
