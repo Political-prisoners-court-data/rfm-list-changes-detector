@@ -1,0 +1,27 @@
+services:
+  pproxy:
+    image: mosajjal/pproxy:latest-uv
+    container_name: pproxy
+    command: -l http://localhost:4321 -r ${REMOTE_SHADOWSOCKS_URI} >> /pproxy-out.log 2>&1 &
+    networks:
+      - default
+  scraper:
+    build:
+      context: ../
+      dockerfile: docker-build/Dockerfile
+    depends_on:
+      - pproxy
+    image: rfm-scraper
+    container_name: rfm-scraper
+    environment:
+      HTTP_PROXY: "pproxy:4321"
+      HTTPS_PROXY: "pproxy:4321"
+      PYTHON_ENV: prod
+    networks:
+      - default
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  default:
+    name: rfm-scraper
