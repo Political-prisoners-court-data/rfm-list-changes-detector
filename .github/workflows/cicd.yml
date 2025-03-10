@@ -24,6 +24,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
       - name: Create .env file
         run: |
           cd docker-build
@@ -42,7 +44,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USERNAME }}
           port: 22
           key: ${{ secrets.DEPLOY_KEY }}
-          source: "./docker-build/compose, ./docker-build/compose.prod.yaml, ./docker-build/.env"
+          source: "./docker-build/compose.yaml, ./docker-build/compose.prod.yaml, ./docker-build/.env"
           target: "~/.deploy/${{ github.event.repository.name }}/"
       - name: remote docker-compose up via ssh
         uses: appleboy/ssh-action@v0.1.5
@@ -54,4 +56,4 @@ jobs:
           script: |
             cd ~/.deploy/${{ github.event.repository.name }}
             docker compose -f ./compose.yml -f ./compose.prod.yml pull
-            docker compose -f ./compose.yml -f ./compose.prod.yml up app -d
+            docker compose -f ./compose.yml -f ./compose.prod.yml up -d
