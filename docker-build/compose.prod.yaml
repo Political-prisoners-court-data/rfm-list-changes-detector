@@ -1,0 +1,9 @@
+services:
+  pproxy:
+    restart: always
+  scraper:
+    build: !reset null
+    image: aleksandrivanov22/rfm-scraper-script:latest
+    restart: always
+    environment:
+      PYTHON_ENV: prod
