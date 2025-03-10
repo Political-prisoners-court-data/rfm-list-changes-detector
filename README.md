@@ -1,5 +1,7 @@
 # Web scipt for detecting changes in fedsfm.ru (RFM, RosFinMonitoring) private persons list
 
+[![Deploy rfm-scraper-script](https://github.com/Political-prisoners-court-data/rfm-list-changes-detector/actions/workflows/cicd.yml/badge.svg?branch=main)](https://github.com/Political-prisoners-court-data/rfm-list-changes-detector/actions/workflows/cicd.yml)
+
 ## Description
 
 Based on following algorithm:
