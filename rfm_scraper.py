@@ -44,7 +44,7 @@ class Person:
 
 
 def load_config(env: str) -> ConfigParser:
-    cfg = ConfigParser(interpolation=ExtendedInterpolation())
+    cfg = ConfigParser(os.environ, interpolation=ExtendedInterpolation())
     cfg.read('config.ini')
     cfg.read(f'config.{env}.ini')
     return cfg
