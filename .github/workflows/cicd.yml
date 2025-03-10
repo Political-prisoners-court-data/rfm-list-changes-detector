@@ -2,7 +2,8 @@ name: Deploy rfm-scraper-script
 
 on:
   push:
-    branches: [main, dev]
+    branches:
+      - main
 
 jobs:
   build:
