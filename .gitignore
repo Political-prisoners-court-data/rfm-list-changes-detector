@@ -4,3 +4,5 @@ __pycache__/
 *.jsonl
 output.*
 
+.env
+docker-build/.env
