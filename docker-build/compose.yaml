@@ -16,7 +16,11 @@ services:
     environment:
       HTTP_PROXY: "http://pproxy:4321"
       HTTPS_PROXY: "http://pproxy:4321"
-      PYTHON_ENV: prod
+      PYTHON_ENV: ${PYTHON_ENV}
+      LOG_LEVEL: ${LOG_LEVEL}
+      MONGO_HOST: ${MONGO_HOST}
+      MONGO_USERNAME: ${MONGO_USERNAME}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
     networks:
       - default
     extra_hosts:
