@@ -46,6 +46,7 @@ jobs:
           key: ${{ secrets.DEPLOY_KEY }}
           source: "./docker-build/compose.yaml, ./docker-build/compose.prod.yaml, ./docker-build/.env"
           target: "~/.deploy/${{ github.event.repository.name }}/"
+          overwrite: true
       - name: remote docker-compose up via ssh
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -54,6 +55,6 @@ jobs:
           key: ${{ secrets.DEPLOY_KEY }}
           port: 22
           script: |
-            cd ~/.deploy/${{ github.event.repository.name }}
+            cd ~/.deploy/${{ github.event.repository.name }}/docker-build
             docker compose -f ./compose.yml -f ./compose.prod.yml pull
             docker compose -f ./compose.yml -f ./compose.prod.yml up -d
