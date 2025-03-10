@@ -11,6 +11,24 @@ Based on following algorithm:
 3. Save detected changes in a list
 4. Save actual list of persons in database
 
+## Run in `docker compose` to combine with Shadowsocks pproxy for getting RU IP
+
+- Specify `REMOTE_SHADOWSOCKS_URI` and other variables in `docker-build/.env` file (see `docker-build/.env.example`) to enable Shadowsocks proxy and MongoDB connection.
+- Execute:
+```Bash
+cd docker-build/
+```
+
+- For local (dev) environment:
+```Bash
+docker compose -f ./compose.yaml up --build --detach
+```
+
+- For production-ready environment:
+```Bash
+docker compose -f ./compose.yaml -f ./compose.prod.yaml up --build --detach
+```
+
 ## Prerequisites
 
 1. Python 3.12
