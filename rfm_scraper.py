@@ -181,8 +181,10 @@ def load_db_persons() -> Dict[Person, Person]:
 
         logger.info('Fetched from db persons count: %d', len(persons))
         return persons
-    except BaseException:
+    except BaseException as e:
+        logger.error("Mongo reading error %s", e)
         mongo.close()
+        raise e
 
 
 def save_list_changes():
