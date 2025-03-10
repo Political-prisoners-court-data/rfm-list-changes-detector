@@ -56,5 +56,5 @@ jobs:
           port: 22
           script: |
             cd ~/.deploy/${{ github.event.repository.name }}/docker-build
-            docker compose -f ./compose.yml -f ./compose.prod.yml pull
-            docker compose -f ./compose.yml -f ./compose.prod.yml up -d
+            docker compose -f ./compose.yaml -f ./compose.prod.yaml pull
+            docker compose -f ./compose.yaml -f ./compose.prod.yaml up -d
